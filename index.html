@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 댄스 & 액션 모션 게임</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- TensorFlow.js and Teachable Machine Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8.3/dist/teachablemachine-pose.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600;800&display=swap');
+        body {
+            font-family: 'Pretendard', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #38bdf8, #818cf8, #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between p-4 md:p-6">
+
+    <!-- Header -->
+    <header class="max-w-6xl w-full mx-auto flex flex-col md:flex-row items-center justify-between gap-4 mb-6 glass-panel p-4 rounded-2xl shadow-xl">
+        <div class="flex items-center space-x-3">
+            <div class="bg-indigo-600 p-3 rounded-xl shadow-lg shadow-indigo-500/30">
+                <i class="fa-solid fa-gamepad text-2xl text-white"></i>
+            </div>
+            <div>
+                <h1 class="text-2xl font-extrabold tracking-tight gradient-text">AI Action Challenger</h1>
+                <p class="text-xs text-slate-400">유튜브 영상을 보며 모션을 맞추는 AI 판정 게임</p>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-6 bg-slate-900/80 px-6 py-2.5 rounded-xl border border-slate-700/50">
+            <div class="text-center">
+                <p class="text-xs text-slate-400 font-semibold uppercase tracking-wider">현재 점수</p>
+                <p id="score-display" class="text-3xl font-black text-amber-400 tracking-wider">0</p>
+            </div>
+            <div class="h-8 w-px bg-slate-700"></div>
+            <div class="text-center">
+                <p class="text-xs text-slate-400 font-semibold uppercase tracking-wider">콤보</p>
+                <p id="combo-display" class="text-3xl font-black text-emerald-400 tracking-wider">0</p>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Grid -->
+    <main class="max-w-6xl w-full mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 flex-grow mb-6">
+        
+        <!-- Left Side: YouTube Video Player (7 Cols) -->
+        <section class="lg:col-span-7 flex flex-col glass-panel rounded-2xl p-4 shadow-xl border border-slate-800">
+            <div class="flex justify-between items-center mb-3">
+                <span class="text-sm font-semibold text-slate-300 flex items-center gap-2">
+                    <i class="fa-brands fa-youtube text-red-500 text-lg"></i> 타겟 영상
+                </span>
+                <span id="video-status" class="text-xs px-2.5 py-1 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+                    대기 중
+                </span>
+            </div>
+            
+            <!-- Video Container -->
+            <div class="relative w-full aspect-video rounded-xl overflow-hidden bg-black shadow-inner border border-slate-800">
+                <div id="player" class="w-full h-full"></div>
+                <!-- Combo / Hit Overlay on Video -->
+                <div id="hit-feedback" class="absolute inset-0 pointer-events-none flex items-center justify-center transition-all duration-300 opacity-0 scale-75">
+                    <span class="text-5xl md:text-7xl font-black italic drop-shadow-[0_5px_5px_rgba(0,0,0,0.8)] text-yellow-300" id="feedback-text">PERFECT!</span>
+                </div>
+            </div>
+
+            <!-- Target Motion Alert Banner -->
+            <div class="mt-4 p-4 rounded-xl bg-gradient-to-r from-indigo-900/60 to-purple-900/60 border border-indigo-500/30 flex items-center justify-between">
+                <div>
+                    <span class="text-xs font-bold text-indigo-300 uppercase tracking-widest block">다음 수행해야 할 동작</span>
+                    <span id="target-action" class="text-2xl font-black text-white tracking-wide">JUMP</span>
+                </div>
+                <div id="motion-match-badge" class="px-4 py-2 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-400 text-sm font-bold flex items-center gap-2">
+                    <div class="w-3 h-3 rounded-full bg-slate-500 animate-pulse" id="status-dot"></div>
+                    <span id="match-status-text">동작 미치</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Side: Webcam and Model Status (5 Cols) -->
+        <section class="lg:col-span-5 flex flex-col gap-4">
+            
+            <!-- Webcam Box -->
+            <div class="glass-panel rounded-2xl p-4 shadow-xl border border-slate-800 flex flex-col items-center">
+                <div class="w-full flex justify-between items-center mb-3">
+                    <span class="text-sm font-semibold text-slate-300 flex items-center gap-2">
+                        <i class="fa-solid fa-camera text-indigo-400"></i> 내 웹캠
+                    </span>
+                    <span id="webcam-status" class="text-xs px-2.5 py-1 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+                        카메라 꺼짐
+                    </span>
+                </div>
+                
+                <div class="relative w-full aspect-video bg-black rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center">
+                    <canvas id="canvas" class="w-full h-full object-cover transform -scale-x-100"></canvas>
+                    <div id="webcam-placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-slate-500 p-4 text-center">
+                        <i class="fa-solid fa-video-slash text-4xl mb-2"></i>
+                        <p class="text-sm">모델을 연결하고 웹캠을 시작하세요.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Model Controls & Probability Gauges -->
+            <div class="glass-panel rounded-2xl p-4 shadow-xl border border-slate-800 flex-grow flex flex-col justify-between">
+                <div>
+                    <h3 class="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
+                        <i class="fa-solid fa-brain text-purple-400"></i> AI 인식 확률 (Teachable Machine)
+                    </h3>
+                    
+                    <!-- Probability Bars Container -->
+                    <div id="label-container" class="space-y-2.5">
+                        <!-- Dynamic probability items will be inserted here -->
+                        <div class="text-xs text-slate-500 text-center py-4">모델 URL을 입력하고 [게임 시작]을 눌러주세요.</div>
+                    </div>
+                </div>
+
+                <!-- Teachable Machine Model URL Input -->
+                <div class="mt-4 pt-4 border-t border-slate-800">
+                    <label class="block text-xs text-slate-400 mb-1 font-semibold">Teachable Machine Model URL</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="model-url-input" 
+                            placeholder="https://teachablemachine.withgoogle.com/models/YOUR_MODEL_ID/" 
+                            class="flex-grow bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors">
+                        <button id="start-btn" onclick="initGame()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2 rounded-lg text-xs transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2 whitespace-nowrap">
+                            <i class="fa-solid fa-play"></i> 게임 시작
+                        </button>
+                    </div>
+                    <p class="text-[10px] text-slate-500 mt-1">※ Teachable Machine(Pose)에서 내보낸 URL을 넣으세요. (끝에 / 포함)</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Action Sequence Timeline Display -->
+    <footer class="max-w-6xl w-full mx-auto glass-panel p-4 rounded-2xl shadow-xl border border-slate-800">
+        <h4 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+            <i class="fa-solid fa-list-ol text-indigo-400"></i> 타임라인 액션 시퀀스 (순서대로 실행)
+        </h4>
+        <div id="timeline-container" class="flex gap-3 overflow-x-auto pb-2">
+            <!-- Action cards injected via JS -->
+        </div>
+    </footer>
+
+    <script>
+        // YouTube Video ID (사용자 제공 링크: oRr5hxr_bRA)
+        const YOUTUBE_VIDEO_ID = 'oRr5hxr_bRA';
+
+        // 티처블 머신에 설정된 6개의 클래스명
+        const CLASS_NAMES = ['REST', 'SAY HI', 'WALK', 'SWING', 'PAW', 'JUMP'];
+
+        // 영상 시간에 맞춘 동작 시퀀스 정의 (초 단위)
+        // 영상 흐름에 맞춰 동작 시작 시간과 끝나는 시간을 설정해두었습니다. 필요시 조정 가능합니다.
+        const ACTION_SEQUENCE = [
+            { time: 3,  action: 'SAY HI', label: '인사하기 (SAY HI)' },
+            { time: 10, action: 'WALK',   label: '걸어가기 (WALK)' },
+            { time: 18, action: 'SWING',  label: '스윙하기 (SWING)' },
+            { time: 26, action: 'PAW',    label: '손 내밀기 (PAW)' },
+            { time: 34, action: 'JUMP',   label: '점프하기 (JUMP)' },
+            { time: 42, action: 'REST',   label: '휴식하기 (REST)' }
+        ];
+
+        let player;
+        let model, maxPredictions;
+        let webcamCanvas, ctx;
+        let currentTargetIndex = 0;
+        let score = 0;
+        let combo = 0;
+        let isScoredForCurrentAction = false;
+        let isGameStarted = false;
+
+        // YouTube IFrame Player API Async Load
+        const tag = document.createElement('script');
+        tag.src = "https://www.youtube.com/iframe_api";
+        const firstScriptTag = document.getElementsByTagName('script')[0];
+        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
+        function onYouTubeIframeAPIReady() {
+            player = new YT.Player('player', {
+                videoId: YOUTUBE_VIDEO_ID,
+                playerVars: {
+                    'playsinline': 1,
+                    'controls': 1,
+                    'rel': 0
+                },
+                events: {
+                    'onReady': onPlayerReady,
+                    'onStateChange': onPlayerStateChange
+                }
+            });
+        }
+
+        function onPlayerReady(event) {
+            document.getElementById('video-status').innerText = '준비 완료';
+            document.getElementById('video-status').classList.replace('text-slate-400', 'text-emerald-400');
+            renderTimeline();
+        }
+
+        function onPlayerStateChange(event) {
+            if (event.data == YT.PlayerState.PLAYING) {
+                document.getElementById('video-status').innerText = '재생 중';
+            } else if (event.data == YT.PlayerState.PAUSED) {
+                document.getElementById('video-status').innerText = '일시정지';
+            }
+        }
+
+        function renderTimeline() {
+            const container = document.getElementById('timeline-container');
+            container.innerHTML = '';
+
+            ACTION_SEQUENCE.forEach((item, index) => {
+                const card = document.createElement('div');
+                card.id = `timeline-item-${index}`;
+                card.className = `flex-shrink-0 w-36 p-3 rounded-xl border border-slate-800 bg-slate-900/60 transition-all flex flex-col justify-between`;
+                card.innerHTML = `
+                    <div class="flex justify-between items-center text-[10px] text-slate-500 mb-1">
+                        <span>#${index + 1}</span>
+                        <span>${item.time}s ~</span>
+                    </div>
+                    <p class="text-xs font-bold text-slate-300 truncate">${item.action}</p>
+                    <p class="text-[10px] text-slate-500 truncate">${item.label}</p>
+                `;
+                container.appendChild(card);
+            });
+            updateActiveTimelineCard(0);
+        }
+
+        function updateActiveTimelineCard(activeIndex) {
+            ACTION_SEQUENCE.forEach((_, idx) => {
+                const card = document.getElementById(`timeline-item-${idx}`);
+                if (!card) return;
+                if (idx === activeIndex) {
+                    card.className = `flex-shrink-0 w-36 p-3 rounded-xl border-2 border-indigo-500 bg-indigo-950/40 text-white shadow-lg shadow-indigo-500/20 scale-105 transition-all`;
+                } else if (idx < activeIndex) {
+                    card.className = `flex-shrink-0 w-36 p-3 rounded-xl border border-slate-800 bg-slate-900/30 text-slate-600 opacity-60 transition-all`;
+                } else {
+                    card.className = `flex-shrink-0 w-36 p-3 rounded-xl border border-slate-800 bg-slate-900/60 text-slate-400 transition-all`;
+                }
+            });
+        }
+
+        async function initGame() {
+            const inputUrl = document.getElementById('model-url-input').value.trim();
+            if (!inputUrl) {
+                alert("Teachable Machine 모델 URL을 입력해주세요!");
+                return;
+            }
+
+            const startBtn = document.getElementById('start-btn');
+            startBtn.disabled = true;
+            startBtn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> 로딩 중...`;
+
+            let URL = inputUrl;
+            if (!URL.endsWith('/')) URL += '/';
+            const modelURL = URL + 'model.json';
+            const metadataURL = URL + 'metadata.json';
+
+            try {
+                // Load pose model
+                model = await tmPose.load(modelURL, metadataURL);
+                maxPredictions = model.getTotalClasses();
+
+                // Setup Canvas & Webcam
+                webcamCanvas = document.getElementById('canvas');
+                webcamCanvas.width = 320;
+                webcamCanvas.height = 240;
+                ctx = webcamCanvas.getContext('2d');
+
+                // Camera stream setup
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
+                const videoEl = document.createElement('video');
+                videoEl.srcObject = stream;
+                videoEl.play();
+
+                document.getElementById('webcam-placeholder').classList.add('hidden');
+                document.getElementById('webcam-status').innerText = '인식 중';
+                document.getElementById('webcam-status').classList.replace('text-slate-400', 'text-emerald-400');
+
+                // Setup Progress Labels UI
+                setupLabelContainer();
+
+                isGameStarted = true;
+                startBtn.innerHTML = `<i class="fa-solid fa-check"></i> 준비 완료`;
+                startBtn.classList.replace('bg-indigo-600', 'bg-emerald-600');
+
+                // Start YouTube Video
+                if (player && player.playVideo) {
+                    player.playVideo();
+                }
+
+                // Main Game & Prediction Loop
+                window.requestAnimationFrame(() => gameLoop(videoEl));
+
+            } catch (err) {
+                console.error(err);
+                alert("모델을 불러오는데 실패했습니다. URL을 다시 확인해주세요.");
+                startBtn.disabled = false;
+                startBtn.innerHTML = `<i class="fa-solid fa-play"></i> 게임 시작`;
+            }
+        }
+
+        function setupLabelContainer() {
+            const container = document.getElementById('label-container');
+            container.innerHTML = '';
+
+            CLASS_NAMES.forEach((name) => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'space-y-1';
+                wrapper.innerHTML = `
+                    <div class="flex justify-between text-xs font-semibold">
+                        <span class="text-slate-300">${name}</span>
+                        <span id="prob-text-${name}" class="text-slate-400">0%</span>
+                    </div>
+                    <div class="w-full h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                        <div id="prob-bar-${name}" class="h-full bg-gradient-to-r from-indigo-500 to-purple-500 w-0 transition-all duration-150"></div>
+                    </div>
+                `;
+                container.appendChild(wrapper);
+            });
+        }
+
+        async function gameLoop(videoEl) {
+            if (!isGameStarted) return;
+
+            // Draw webcam video frame to Canvas
+            ctx.drawImage(videoEl, 0, 0, webcamCanvas.width, webcamCanvas.height);
+
+            // Estimate pose and predict
+            const { pose, posenetOutput } = await model.estimatePose(webcamCanvas);
+            const prediction = await model.predict(posenetOutput);
+
+            // Draw Skeleton Keypoints
+            if (pose) {
+                drawSkeleton(pose);
+            }
+
+            // Update Prediction Gauges UI
+            let highestProbAction = '';
+            let highestProb = 0;
+
+            for (let i = 0; i < maxPredictions; i++) {
+                const className = prediction[i].className.trim().toUpperCase();
+                const probability = prediction[i].probability;
+
+                const bar = document.getElementById(`prob-bar-${className}`);
+                const text = document.getElementById(`prob-text-${className}`);
+
+                if (bar && text) {
+                    const percent = Math.round(probability * 100);
+                    bar.style.width = percent + '%';
+                    text.innerText = percent + '%';
+                }
+
+                if (probability > highestProb) {
+                    highestProb = probability;
+                    highestProbAction = className;
+                }
+            }
+
+            // Check timing against video current time
+            if (player && player.getCurrentTime) {
+                const currentTime = player.getCurrentTime();
+                updateTargetActionByTime(currentTime);
+                checkActionMatch(highestProbAction, highestProb);
+            }
+
+            window.requestAnimationFrame(() => gameLoop(videoEl));
+        }
+
+        function updateTargetActionByTime(currentTime) {
+            let activeIdx = 0;
+
+            for (let i = ACTION_SEQUENCE.length - 1; i >= 0; i--) {
+                if (currentTime >= ACTION_SEQUENCE[i].time) {
+                    activeIdx = i;
+                    break;
+                }
+            }
+
+            if (activeIdx !== currentTargetIndex) {
+                currentTargetIndex = activeIdx;
+                isScoredForCurrentAction = false; // Reset scoring flag for new action
+                updateActiveTimelineCard(currentTargetIndex);
+            }
+
+            const currentTarget = ACTION_SEQUENCE[currentTargetIndex];
+            document.getElementById('target-action').innerText = currentTarget.action;
+        }
+
+        function checkActionMatch(detectedAction, probability) {
+            const targetAction = ACTION_SEQUENCE[currentTargetIndex].action;
+            const badgeDot = document.getElementById('status-dot');
+            const matchStatusText = document.getElementById('match-status-text');
+
+            // Threshold threshold >= 80% Match
+            if (detectedAction === targetAction && probability >= 0.8) {
+                badgeDot.className = "w-3 h-3 rounded-full bg-emerald-400 animate-ping";
+                matchStatusText.innerText = "동작 일치!";
+                matchStatusText.className = "text-emerald-400 font-extrabold";
+
+                if (!isScoredForCurrentAction) {
+                    isScoredForCurrentAction = true;
+                    score += 100 + (combo * 10);
+                    combo += 1;
+
+                    document.getElementById('score-display').innerText = score;
+                    document.getElementById('combo-display').innerText = combo;
+
+                    triggerFeedbackAnimation("PERFECT!");
+                }
+            } else {
+                badgeDot.className = "w-3 h-3 rounded-full bg-slate-500 animate-pulse";
+                matchStatusText.innerText = "동작 대기중";
+                matchStatusText.className = "text-slate-400 font-bold";
+            }
+        }
+
+        function triggerFeedbackAnimation(text) {
+            const feedbackElem = document.getElementById('hit-feedback');
+            const feedbackText = document.getElementById('feedback-text');
+
+            feedbackText.innerText = text;
+            feedbackElem.classList.remove('opacity-0', 'scale-75');
+            feedbackElem.classList.add('opacity-100', 'scale-110');
+
+            setTimeout(() => {
+                feedbackElem.classList.remove('opacity-100', 'scale-110');
+                feedbackElem.classList.add('opacity-0', 'scale-75');
+            }, 800);
+        }
+
+        function drawSkeleton(pose) {
+            if (!pose || !pose.keypoints) return;
+
+            // Draw keypoints
+            for (let i = 0; i < pose.keypoints.length; i++) {
+                const keypoint = pose.keypoints[i];
+                if (keypoint.score > 0.5) {
+                    const { x, y } = keypoint.position;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 4, 0, 2 * Math.PI);
+                    ctx.fillStyle = '#818cf8';
+                    ctx.fill();
+                }
+            }
+        }
+    </script>
+</body>
+</html>
